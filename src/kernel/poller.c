@@ -859,6 +859,7 @@ static void __poller_handle_timeout(const struct __poller_node *time_node,
 	LIST_HEAD(timeo_list);
 
 	pthread_mutex_lock(&poller->mutex);
+	//* 遍历链表，把所有比当前定时器的任务都找出来
 	list_for_each_safe(pos, tmp, &poller->timeo_list)
 	{
 		node = list_entry(pos, struct __poller_node, list);
@@ -876,6 +877,7 @@ static void __poller_handle_timeout(const struct __poller_node *time_node,
 			break;
 	}
 
+	//* 遍历红黑树，把所有比当前定时器的任务都找出来
 	while (poller->tree_first)
 	{
 		node = rb_entry(poller->tree_first, struct __poller_node, rb);
@@ -915,20 +917,24 @@ static void __poller_set_timer(poller_t *poller)
 	struct timespec abstime;
 
 	pthread_mutex_lock(&poller->mutex);
+	//* 取数组中第一个timer节点
 	if (!list_empty(&poller->timeo_list))
 		node = list_entry(poller->timeo_list.next, struct __poller_node, list);
 
 	if (poller->tree_first)
 	{
+		//* 取红黑树中第一个节点
 		first = rb_entry(poller->tree_first, struct __poller_node, rb);
 		if (!node || __timeout_cmp(first, node) < 0)
 			node = first;
 	}
 
+	//* 如果还有timer，那么就设置其时间
 	if (node)
 		abstime = node->timeout;
 	else
 	{
+		//* 没有timer了，设置为0
 		abstime.tv_sec = 0;
 		abstime.tv_nsec = 0;
 	}
@@ -949,6 +955,7 @@ static void *__poller_thread_routine(void *arg)
 
 	while (1)
 	{
+		//* 每次循环，都要检查timer是否已经到位了，并设置下一个timer
 		__poller_set_timer(poller);
 		nevents = __poller_wait(events, POLLER_EVENTS_MAX, poller);
 		clock_gettime(CLOCK_MONOTONIC, &time_node.timeout);
@@ -999,6 +1006,7 @@ static void *__poller_thread_routine(void *arg)
 				break;
 		}
 
+		//* 这里来处理定时器
 		__poller_handle_timeout(&time_node, poller);
 	}
 
@@ -1146,6 +1154,8 @@ static void __poller_insert_node(struct __poller_node *node,
 {
 	struct __poller_node *end;
 
+	//* 对比最后一个节点和输入节点的时间大小
+	//* 如果别最后一个节点大，那么放到列表的尾部
 	end = list_entry(poller->timeo_list.prev, struct __poller_node, list);
 	if (list_empty(&poller->timeo_list) || __timeout_cmp(node, end) >= 0)
 		list_add_tail(&node->list, &poller->timeo_list);
@@ -1155,15 +1165,18 @@ static void __poller_insert_node(struct __poller_node *node,
 	if (&node->list == poller->timeo_list.next)
 	{
 		if (poller->tree_first)
+		//* 取红黑树中第一个节点
 			end = rb_entry(poller->tree_first, struct __poller_node, rb);
 		else
 			end = NULL;
 	}
 	else if (&node->rb == poller->tree_first)
+		//* 取链表中第一个元素
 		end = list_entry(poller->timeo_list.next, struct __poller_node, list);
 	else
 		return;
 
+	//* 发现存在第一个节点，也就是说目前的timer已经被设置了，无需在重复设置
 	if (!end || __timeout_cmp(node, end) < 0)
 		__poller_set_timerfd(poller->timerfd, &node->timeout, poller);
 }
