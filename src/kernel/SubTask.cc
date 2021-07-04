@@ -40,6 +40,8 @@ void SubTask::subtask_done()
 		}
 		else if (parent)
 		{
+			//* 如果该任务为并行任务的子任务，执行完后将并行任务的剩余任务数减1
+			//* 如果减1后剩余任务数为0，那么就执行并行任务的回调函数
 			if (__sync_sub_and_fetch(&parent->nleft, 1) == 0)
 			{
 				cur = parent;

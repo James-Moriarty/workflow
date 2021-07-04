@@ -122,6 +122,7 @@ public:
 	}
 
 	/* wait_timeout in milliseconds, -1 for no timeout. */
+	//* 网络请求使用request进行请求
 	int request(CommSession *session, CommSchedObject *object,
 				int wait_timeout, CommTarget **target)
 	{

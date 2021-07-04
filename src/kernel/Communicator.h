@@ -244,11 +244,7 @@ public:
 	friend class Communicator;
 };
 
-#ifdef __linux__
 # include "IOService_linux.h"
-#else
-# include "IOService_thread.h"
-#endif
 
 class Communicator
 {

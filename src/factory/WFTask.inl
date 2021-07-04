@@ -83,6 +83,7 @@ protected:
 	std::function<void (WFNetworkTask<REQ, RESP> *)> prepare;
 
 public:
+	//* 对于complexclienttask，object是null
 	WFClientTask(CommSchedObject *object, CommScheduler *scheduler,
 				 std::function<void (WFNetworkTask<REQ, RESP> *)>&& cb) :
 		WFNetworkTask<REQ, RESP>(object, scheduler, std::move(cb))

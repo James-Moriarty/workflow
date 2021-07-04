@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "future": "cpp",
+        "system_error": "cpp",
+        "xlocale": "cpp",
+        "chrono": "cpp",
+        "vector": "cpp",
+        "xstring": "cpp",
+        "functional": "cpp"
+    }
+}

@@ -19,14 +19,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
-#ifdef __linux__
 # include <sys/epoll.h>
 # include <sys/timerfd.h>
-#else
-# include <sys/event.h>
-# undef LIST_HEAD
-# undef SLIST_HEAD
-#endif
 #include <errno.h>
 #include <limits.h>
 #include <unistd.h>
@@ -87,8 +81,6 @@ struct __poller
 	pthread_mutex_t mutex;
 	char buf[POLLER_BUFSIZE];
 };
-
-#ifdef __linux__
 
 static inline int __poller_create_pfd()
 {
@@ -163,92 +155,6 @@ static inline void *__poller_event_data(const __poller_event_t *event)
 {
 	return event->data.ptr;
 }
-
-#else /* BSD, macOS */
-
-static inline int __poller_create_pfd()
-{
-	return kqueue();
-}
-
-static inline int __poller_add_fd(int fd, int event, void *data,
-								  poller_t *poller)
-{
-	struct kevent ev;
-	EV_SET(&ev, fd, event, EV_ADD, 0, 0, data);
-	return kevent(poller->pfd, &ev, 1, NULL, 0, NULL);
-}
-
-static inline int __poller_del_fd(int fd, int event, poller_t *poller)
-{
-	struct kevent ev;
-	EV_SET(&ev, fd, event, EV_DELETE, 0, 0, NULL);
-	return kevent(poller->pfd, &ev, 1, NULL, 0, NULL);
-}
-
-static inline int __poller_mod_fd(int fd, int old_event,
-								  int new_event, void *data,
-								  poller_t *poller)
-{
-	struct kevent ev[2];
-	EV_SET(&ev[0], fd, old_event, EV_DELETE, 0, 0, NULL);
-	EV_SET(&ev[1], fd, new_event, EV_ADD, 0, 0, data);
-	return kevent(poller->pfd, ev, 2, NULL, 0, NULL);
-}
-
-static inline int __poller_create_timerfd()
-{
-	return dup(0);
-}
-
-static inline int __poller_add_timerfd(int fd, poller_t *poller)
-{
-	return 0;
-}
-
-static int __poller_set_timerfd(int fd, const struct timespec *abstime,
-								poller_t *poller)
-{
-	struct timespec curtime;
-	long long nseconds;
-	struct kevent ev;
-	int flags;
-
-	if (abstime->tv_sec || abstime->tv_nsec)
-	{
-		clock_gettime(CLOCK_MONOTONIC, &curtime);
-		nseconds = 1000000000LL * (abstime->tv_sec - curtime.tv_sec);
-		nseconds += abstime->tv_nsec - curtime.tv_nsec;
-		flags = EV_ADD;
-	}
-	else
-	{
-		nseconds = 0;
-		flags = EV_DELETE;
-	}
-
-	EV_SET(&ev, fd, EVFILT_TIMER, flags, NOTE_NSECONDS, nseconds, NULL);
-	return kevent(poller->pfd, &ev, 1, NULL, 0, NULL);
-}
-
-typedef struct kevent __poller_event_t;
-
-static inline int __poller_wait(__poller_event_t *events, int maxevents,
-								poller_t *poller)
-{
-	return kevent(poller->pfd, NULL, 0, events, maxevents, NULL);
-}
-
-static inline void *__poller_event_data(const __poller_event_t *event)
-{
-	return event->udata;
-}
-
-#define EPOLLIN		EVFILT_READ
-#define EPOLLOUT	EVFILT_WRITE
-#define EPOLLET		0
-
-#endif
 
 static inline long __timeout_cmp(const struct __poller_node *node1,
 								 const struct __poller_node *node2)
@@ -856,6 +762,7 @@ static void __poller_handle_timeout(const struct __poller_node *time_node,
 {
 	struct __poller_node *node;
 	struct list_head *pos, *tmp;
+	//* 新建一个节点
 	LIST_HEAD(timeo_list);
 
 	pthread_mutex_lock(&poller->mutex);
@@ -1438,6 +1345,7 @@ int poller_set_timeout(int fd, int timeout, poller_t *poller)
 		__poller_node_set_timeout(timeout, &time_node);
 
 	pthread_mutex_lock(&poller->mutex);
+	//* 把该fd对应的node拿出来，从等待时间红黑树中删掉，如果超时大于0，就设置新的超时重新插入红黑树
 	node = poller->nodes[fd];
 	if (node)
 	{

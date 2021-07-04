@@ -27,6 +27,7 @@
 class CommRequest : public SubTask, public CommSession
 {
 public:
+	// 对于complexclient，object是nullptr
 	CommRequest(CommSchedObject *object, CommScheduler *scheduler)
 	{
 		this->scheduler = scheduler;
@@ -35,6 +36,8 @@ public:
 	}
 
 	CommSchedObject *get_request_object() const { return this->object; }
+	// 对于object，会在route()的时候set reqeust object
+	// router需要仔细看下具体的含义
 	void set_request_object(CommSchedObject *object) { this->object = object; }
 	int get_wait_timeout() const { return this->wait_timeout; }
 	void set_wait_timeout(int timeout) { this->wait_timeout = timeout; }

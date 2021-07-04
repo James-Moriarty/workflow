@@ -36,6 +36,7 @@ void CommRequest::handle(int state, int error)
 
 void CommRequest::dispatch()
 {
+	// 把自己本身当做一个session传给scheduler
 	if (this->scheduler->request(this, this->object, this->wait_timeout,
 								 &this->target) < 0)
 	{
