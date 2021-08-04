@@ -49,7 +49,7 @@ public:
 		int state;
 
 	private:
-		virtual CommConnection *new_connection(int)
+		virtual WFConnection *new_connection(int connect_fd)
 		{
 			return new WFConnection;
 		}
@@ -63,6 +63,7 @@ public:
 			const struct addrinfo *addrinfo,
 			const std::string& other_info,
 			const struct EndpointParams *endpoint_params,
+			const std::string& hostname,
 			RouteResult& result);
 
 	RouteManager()

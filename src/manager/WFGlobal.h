@@ -27,11 +27,12 @@
 #include <string>
 #include <openssl/ssl.h>
 #include "CommScheduler.h"
-#include "DNSCache.h"
+#include "DnsCache.h"
 #include "RouteManager.h"
 #include "Executor.h"
 #include "EndpointParams.h"
 #include "WFNameService.h"
+#include "WFDnsResolver.h"
 
 /**
  * @file    WFGlobal.h
@@ -46,12 +47,15 @@
 struct WFGlobalSettings
 {
 	struct EndpointParams endpoint_params;
+	struct EndpointParams dns_server_params;
 	unsigned int dns_ttl_default;	///< in seconds, DNS TTL when network request success
 	unsigned int dns_ttl_min;		///< in seconds, DNS TTL when network request fail
 	int dns_threads;
 	int poller_threads;
 	int handler_threads;
 	int compute_threads;			///< auto-set by system CPU number if value<=0
+	const char *resolv_conf_path;
+	const char *hosts_path;
 };
 
 /**
@@ -60,12 +64,15 @@ struct WFGlobalSettings
 static constexpr struct WFGlobalSettings GLOBAL_SETTINGS_DEFAULT =
 {
 	.endpoint_params	=	ENDPOINT_PARAMS_DEFAULT,
+	.dns_server_params	=	ENDPOINT_PARAMS_DEFAULT,
 	.dns_ttl_default	=	12 * 3600,
 	.dns_ttl_min		=	180,
 	.dns_threads		=	4,
 	.poller_threads		=	4,
 	.handler_threads	=	20,
 	.compute_threads	=	-1,
+	.resolv_conf_path	=	NULL,			// use thread dns task for default
+	.hosts_path			=	NULL,
 };
 
 /**
@@ -105,19 +112,23 @@ public:
 
 	static const char *get_error_string(int state, int error);
 
-public:
 	// Internal usage only
+public:
 	static CommScheduler *get_scheduler();
-	static DNSCache *get_dns_cache();
+	static DnsCache *get_dns_cache();
 	static RouteManager *get_route_manager();
 	static SSL_CTX *get_ssl_client_ctx();
-	static SSL_CTX *get_ssl_server_ctx();
+	static SSL_CTX *new_ssl_server_ctx();
 	static ExecQueue *get_exec_queue(const std::string& queue_name);
 	static Executor *get_compute_executor();
 	static IOService *get_io_service();
 	static ExecQueue *get_dns_queue();
 	static Executor *get_dns_executor();
 	static WFNameService *get_name_service();
+	static WFDnsResolver *get_dns_resolver();
+	static class WFDnsClient *get_dns_client();
+
+public:
 	static void sync_operation_begin();
 	static void sync_operation_end();
 };

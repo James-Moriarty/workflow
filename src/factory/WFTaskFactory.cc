@@ -25,6 +25,53 @@
 #include "WFGlobal.h"
 #include "WFTaskFactory.h"
 
+class __WFTimerTask : public WFTimerTask
+{
+protected:
+	virtual int duration(struct timespec *value)
+	{
+		value->tv_sec = this->seconds;
+		value->tv_nsec = this->nanoseconds;
+		return 0;
+	}
+
+protected:
+	time_t seconds;
+	long nanoseconds;
+
+public:
+	__WFTimerTask(time_t seconds, long nanoseconds, CommScheduler *scheduler,
+				  timer_callback_t&& cb) :
+		WFTimerTask(scheduler, std::move(cb))
+	{
+		this->seconds = seconds;
+		this->nanoseconds = nanoseconds;
+	}
+};
+
+WFTimerTask *WFTaskFactory::create_timer_task(unsigned int microseconds,
+											  timer_callback_t callback)
+{
+	return new __WFTimerTask((time_t)(microseconds / 1000000),
+							 (long)(microseconds % 1000000 * 1000),
+							 WFGlobal::get_scheduler(),
+							 std::move(callback));
+}
+
+WFTimerTask *WFTaskFactory::create_timer_task(const std::string& name,
+											  unsigned int microseconds,
+											  timer_callback_t callback)
+{
+	return WFTaskFactory::create_timer_task(microseconds, std::move(callback));
+}
+
+WFTimerTask *WFTaskFactory::create_timer_task(time_t seconds, long nanoseconds,
+											  timer_callback_t callback)
+{
+	return new __WFTimerTask(seconds, nanoseconds, WFGlobal::get_scheduler(),
+							 std::move(callback));
+}
+
 class __WFCounterTask;
 
 struct __counter_node
@@ -293,195 +340,29 @@ void WFTaskFactory::count_by_name(const std::string& counter_name, unsigned int 
 	__CounterMap::get_instance()->count_n(counter_name, n);
 }
 
-WFDNSTask *WFTaskFactory::create_dns_task(const std::string& host,
-										  unsigned short port,
-										  dns_callback_t callback)
-{
-	auto *task = WFThreadTaskFactory<DNSInput, DNSOutput>::
-						create_thread_task(WFGlobal::get_dns_queue(),
-										   WFGlobal::get_dns_executor(),
-										   DNSRoutine::run,
-										   std::move(callback));
+/********MailboxTask*************/
 
-	task->get_input()->reset(host, port);
-	return task;
-}
-
-/********FileIOTask*************/
-
-class WFFilepreadTask : public WFFileIOTask
+class __WFMailboxTask : public WFMailboxTask
 {
 public:
-	WFFilepreadTask(int fd, void *buf, size_t count, off_t offset,
-					IOService *service, fio_callback_t&& cb) :
-		WFFileIOTask(service, std::move(cb))
+	__WFMailboxTask(size_t size, mailbox_callback_t&& cb) :
+		WFMailboxTask(new void *[size], size, std::move(cb))
 	{
-		this->args.fd = fd;
-		this->args.buf = buf;
-		this->args.count = count;
-		this->args.offset = offset;
 	}
 
-	virtual int prepare()
+	virtual ~__WFMailboxTask()
 	{
-		this->prep_pread(this->args.fd, this->args.buf, this->args.count,
-						 this->args.offset);
-		return 0;
+		delete []this->mailbox;
 	}
 };
 
-class WFFilepwriteTask : public WFFileIOTask
+WFMailboxTask *WFTaskFactory::create_mailbox_task(size_t size,
+												  mailbox_callback_t callback)
 {
-public:
-	WFFilepwriteTask(int fd, const void *buf, size_t count, off_t offset,
-					 IOService *service, fio_callback_t&& cb) :
-		WFFileIOTask(service, std::move(cb))
-	{
-		this->args.fd = fd;
-		this->args.buf = (void *)buf;
-		this->args.count = count;
-		this->args.offset = offset;
-	}
-
-	virtual int prepare()
-	{
-		this->prep_pwrite(this->args.fd, this->args.buf, this->args.count,
-						  this->args.offset);
-		return 0;
-	}
-};
-
-class WFFilepreadvTask : public WFFileVIOTask
-{
-public:
-	WFFilepreadvTask(int fd, const struct iovec *iov, int iovcnt, off_t offset,
-					 IOService *service, fvio_callback_t&& cb) :
-		WFFileVIOTask(service, std::move(cb))
-	{
-		this->args.fd = fd;
-		this->args.iov = iov;
-		this->args.iovcnt = iovcnt;
-		this->args.offset = offset;
-	}
-
-	virtual int prepare()
-	{
-		this->prep_preadv(this->args.fd, this->args.iov, this->args.iovcnt,
-						  this->args.offset);
-		return 0;
-	}
-};
-
-class WFFilepwritevTask : public WFFileVIOTask
-{
-public:
-	WFFilepwritevTask(int fd, const struct iovec *iov, int iovcnt, off_t offset,
-					  IOService *service, fvio_callback_t&& cb) :
-		WFFileVIOTask(service, std::move(cb))
-	{
-		this->args.fd = fd;
-		this->args.iov = iov;
-		this->args.iovcnt = iovcnt;
-		this->args.offset = offset;
-	}
-
-	virtual int prepare()
-	{
-		this->prep_pwritev(this->args.fd, this->args.iov, this->args.iovcnt,
-						   this->args.offset);
-		return 0;
-	}
-};
-
-class WFFilefsyncTask : public WFFileSyncTask
-{
-public:
-	WFFilefsyncTask(int fd, IOService *service, fsync_callback_t&& cb) :
-		WFFileSyncTask(service, std::move(cb))
-	{
-		this->args.fd = fd;
-	}
-
-	virtual int prepare()
-	{
-		this->prep_fsync(this->args.fd);
-		return 0;
-	}
-};
-
-class WFFilefdsyncTask : public WFFileSyncTask
-{
-public:
-	WFFilefdsyncTask(int fd, IOService *service, fsync_callback_t&& cb) :
-		WFFileSyncTask(service, std::move(cb))
-	{
-		this->args.fd = fd;
-	}
-
-	virtual int prepare()
-	{
-		this->prep_fdsync(this->args.fd);
-		return 0;
-	}
-};
-
-WFFileIOTask *WFTaskFactory::create_pread_task(int fd,
-											   void *buf,
-											   size_t count,
-											   off_t offset,
-											   fio_callback_t callback)
-{
-	return new WFFilepreadTask(fd, buf, count, offset,
-							   WFGlobal::get_io_service(),
-							   std::move(callback));
+	return new __WFMailboxTask(size, std::move(callback));
 }
 
-WFFileIOTask *WFTaskFactory::create_pwrite_task(int fd,
-												const void *buf,
-												size_t count,
-												off_t offset,
-												fio_callback_t callback)
+WFMailboxTask *WFTaskFactory::create_mailbox_task(mailbox_callback_t callback)
 {
-	return new WFFilepwriteTask(fd, buf, count, offset,
-								WFGlobal::get_io_service(),
-								std::move(callback));
+	return new WFMailboxTask(std::move(callback));
 }
-
-WFFileVIOTask *WFTaskFactory::create_preadv_task(int fd,
-												 const struct iovec *iovec,
-												 int iovcnt,
-												 off_t offset,
-												 fvio_callback_t callback)
-{
-	return new WFFilepreadvTask(fd, iovec, iovcnt, offset,
-								WFGlobal::get_io_service(),
-								std::move(callback));
-}
-
-WFFileVIOTask *WFTaskFactory::create_pwritev_task(int fd,
-												  const struct iovec *iovec,
-												  int iovcnt,
-												  off_t offset,
-												  fvio_callback_t callback)
-{
-	return new WFFilepwritevTask(fd, iovec, iovcnt, offset,
-								 WFGlobal::get_io_service(),
-								 std::move(callback));
-}
-
-WFFileSyncTask *WFTaskFactory::create_fsync_task(int fd,
-												 fsync_callback_t callback)
-{
-	return new WFFilefsyncTask(fd,
-							   WFGlobal::get_io_service(),
-							   std::move(callback));
-}
-
-WFFileSyncTask *WFTaskFactory::create_fdsync_task(int fd,
-												  fsync_callback_t callback)
-{
-	return new WFFilefdsyncTask(fd,
-								WFGlobal::get_io_service(),
-								std::move(callback));
-}
-

@@ -22,9 +22,10 @@
 
 #define MYSQL_STATE_LENGTH			5
 #define MYSQL_STATE_DEFAULT			"HY000"
-#define MYSQL_NUM_STR_LENGTH		8 // 8 Length-Encoded Integer
-#define MYSQL_FLOAT_STR_LENGTH		7 // 7 for float
-#define MYSQL_DOUBLE_STR_LENGTH		19 // 19 for long double
+#define MYSQL_INT_STR_LENGTH		11	// 10 for unsigned int
+#define MYSQL_LONG_STR_LENGTH		21	// 20 for unsigned long long
+#define MYSQL_FLOAT_STR_LENGTH		7	// 7 for float
+#define MYSQL_DOUBLE_STR_LENGTH		19	// 19 for long double
 
 // may be set by server in EOF/OK packet
 #define MYSQL_SERVER_MORE_RESULTS_EXIST		0x0008
@@ -75,6 +76,7 @@ enum
 	MYSQL_PACKET_NULL,
 	MYSQL_PACKET_EOF,
 	MYSQL_PACKET_ERROR,
+	MYSQL_PACKET_GET_RESULT,
 	MYSQL_PACKET_LOCAL_INLINE,
 };
 
@@ -83,9 +85,8 @@ enum
 {
 	MYSQL_STATUS_NOT_INIT	=	0,
 	MYSQL_STATUS_OK,
-	MYSQL_STATUS_EOF,
-	MYSQL_STATUS_ERROR,
 	MYSQL_STATUS_GET_RESULT,
+	MYSQL_STATUS_ERROR,
 	MYSQL_STATUS_END,
 };
 

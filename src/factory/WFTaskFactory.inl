@@ -37,45 +37,6 @@
 #include "EndpointParams.h"
 #include "WFNameService.h"
 
-class __WFTimerTask : public WFTimerTask
-{
-protected:
-	virtual int duration(struct timespec *value)
-	{
-		*value = this->value;
-		return 0;
-	}
-
-protected:
-	struct timespec value;
-
-public:
-	__WFTimerTask(const struct timespec *value, CommScheduler *scheduler,
-				  timer_callback_t&& cb) :
-		WFTimerTask(scheduler, std::move(cb))
-	{
-		this->value = *value;
-	}
-};
-
-inline WFTimerTask *WFTaskFactory::create_timer_task(unsigned int microseconds,
-													 timer_callback_t callback)
-{
-	struct timespec value = {
-		.tv_sec		=	microseconds / 1000000,
-		.tv_nsec	=	microseconds % 1000000 * 1000
-	};
-	return new __WFTimerTask(&value, WFGlobal::get_scheduler(),
-							 std::move(callback));
-}
-
-inline WFTimerTask *WFTaskFactory::create_timer_task(const std::string& name,
-													 unsigned int microseconds,
-													 timer_callback_t callback)
-{
-	return WFTaskFactory::create_timer_task(microseconds, std::move(callback));
-}
-
 class __WFGoTask : public WFGoTask
 {
 protected:
@@ -160,21 +121,6 @@ protected:
 	virtual bool finish_once() { return true; }
 
 public:
-	void set_info(const std::string& info)
-	{
-		info_.assign(info);
-	}
-
-	void set_info(const char *info)
-	{
-		info_.assign(info);
-	}
-
-	void set_type(TransportType type)
-	{
-		type_ = type;
-	}
-
 	void init(const ParsedURI& uri)
 	{
 		uri_ = uri;
@@ -192,13 +138,19 @@ public:
 			  socklen_t addrlen,
 			  const std::string& info);
 
-	const ParsedURI *get_current_uri() const { return &uri_; }
+	void set_transport_type(TransportType type)
+	{
+		type_ = type;
+	}
+
+	TransportType get_transport_type() const { return type_; }
+
+	virtual const ParsedURI *get_current_uri() const { return &uri_; }
 
 	void set_redirect(const ParsedURI& uri)
 	{
 		redirect_ = true;
 		init(uri);
-		retry_times_ = 0;
 	}
 
 	void set_redirect(TransportType type, const struct sockaddr *addr,
@@ -206,7 +158,17 @@ public:
 	{
 		redirect_ = true;
 		init(type, addr, addrlen, info);
-		retry_times_ = 0;
+	}
+
+protected:
+	void set_info(const std::string& info)
+	{
+		info_.assign(info);
+	}
+
+	void set_info(const char *info)
+	{
+		info_.assign(info);
 	}
 
 protected:
@@ -227,8 +189,6 @@ protected:
 		retry_times_ = retry_max_;
 	}
 
-	TransportType get_transport_type() const { return type_; }
-
 protected:
 	TransportType type_;
 	ParsedURI uri_;
@@ -241,17 +201,35 @@ protected:
 	WFNSPolicy *ns_policy_;
 	WFRouterTask *router_task_;
 	RouteManager::RouteResult route_result_;
-	void *cookie_;
+	WFNSTracing tracing_;
 
 public:
 	CTX *get_mutable_ctx() { return &ctx_; }
 
 private:
+	void clear_prev_state();
 	void init_with_uri();
 	bool set_port();
 	void router_callback(WFRouterTask *task);
 	void switch_callback(WFTimerTask *task);
 };
+
+template<class REQ, class RESP, typename CTX>
+void WFComplexClientTask<REQ, RESP, CTX>::clear_prev_state()
+{
+	ns_policy_ = NULL;
+	route_result_.clear();
+	if (tracing_.deleter)
+	{
+		tracing_.deleter(this->tracing_.data);
+		tracing_.deleter = NULL;
+	}
+	tracing_.data = NULL;
+	retry_times_ = 0;
+	this->state = WFT_STATE_UNDEFINED;
+	this->error = 0;
+	this->timeout_reason = TOR_NOT_TIMEOUT;
+}
 
 template<class REQ, class RESP, typename CTX>
 void WFComplexClientTask<REQ, RESP, CTX>::init(TransportType type,
@@ -260,15 +238,9 @@ void WFComplexClientTask<REQ, RESP, CTX>::init(TransportType type,
 											   const std::string& info)
 {
 	if (redirect_)
-	{
-		ns_policy_ = NULL;
-		route_result_.clear();
-		this->state = WFT_STATE_UNDEFINED;
-		this->error = 0;
-		this->timeout_reason = TOR_NOT_TIMEOUT;
-	}
+		clear_prev_state();
 
-	const auto *params = &WFGlobal::get_global_settings()->endpoint_params;
+	auto params = WFGlobal::get_global_settings()->endpoint_params;
 	struct addrinfo addrinfo = { };
 	addrinfo.ai_family = addr->sa_family;
 	addrinfo.ai_socktype = SOCK_STREAM;
@@ -277,8 +249,9 @@ void WFComplexClientTask<REQ, RESP, CTX>::init(TransportType type,
 
 	type_ = type;
 	info_.assign(info);
-	if (WFGlobal::get_route_manager()->get(type, &addrinfo, info_, params,
-										   route_result_) < 0)
+	params.use_tls_sni = false;
+	if (WFGlobal::get_route_manager()->get(type, &addrinfo, info_, &params,
+										   "", route_result_) < 0)
 	{
 		this->state = WFT_STATE_SYS_ERROR;
 		this->error = errno;
@@ -292,58 +265,46 @@ void WFComplexClientTask<REQ, RESP, CTX>::init(TransportType type,
 template<class REQ, class RESP, typename CTX>
 bool WFComplexClientTask<REQ, RESP, CTX>::set_port()
 {
-	int port = 0;
-
-	if (uri_.port && uri_.port[0])
+	if (uri_.port)
 	{
-		port = atoi(uri_.port);
-		if (port < 0 || port > 65535)
+		int port = atoi(uri_.port);
+
+		if (port <= 0 || port > 65535)
 		{
 			this->state = WFT_STATE_TASK_ERROR;
 			this->error = WFT_ERR_URI_PORT_INVALID;
 			return false;
 		}
+
+		return true;
 	}
 
-	if (port == 0 && uri_.scheme)
+	if (uri_.scheme)
 	{
 		const char *port_str = WFGlobal::get_default_port(uri_.scheme);
 
 		if (port_str)
 		{
-			size_t port_len = strlen(port_str);
-
+			uri_.port = strdup(port_str);
 			if (uri_.port)
-				free(uri_.port);
+				return true;
 
-			uri_.port = (char *)malloc(port_len + 1);
-			if (!uri_.port)
-			{
-				uri_.state = URI_STATE_ERROR;
-				uri_.error = errno;
-				this->state = WFT_STATE_SYS_ERROR;
-				this->error = errno;
-				return false;
-			}
-
-			memcpy(uri_.port, port_str, port_len + 1);
+			this->state = WFT_STATE_SYS_ERROR;
+			this->error = errno;
+			return false;
 		}
 	}
 
-	return true;
+	this->state = WFT_STATE_TASK_ERROR;
+	this->error = WFT_ERR_URI_SCHEME_INVALID;
+	return false;
 }
 
 template<class REQ, class RESP, typename CTX>
 void WFComplexClientTask<REQ, RESP, CTX>::init_with_uri()
 {
 	if (redirect_)
-	{
-		ns_policy_ = NULL;
-		route_result_.clear();
-		this->state = WFT_STATE_UNDEFINED;
-		this->error = 0;
-		this->timeout_reason = TOR_NOT_TIMEOUT;
-	}
+		clear_prev_state();
 
 	if (uri_.state == URI_STATE_SUCCESS)
 	{
@@ -370,7 +331,6 @@ void WFComplexClientTask<REQ, RESP, CTX>::init_with_uri()
 template<class REQ, class RESP, typename CTX>
 WFRouterTask *WFComplexClientTask<REQ, RESP, CTX>::route()
 {
-	WFNameService *ns = WFGlobal::get_name_service();
 	auto&& cb = std::bind(&WFComplexClientTask::router_callback,
 						  this,
 						  std::placeholders::_1);
@@ -380,8 +340,15 @@ WFRouterTask *WFComplexClientTask<REQ, RESP, CTX>::route()
 		.info			=	info_.c_str(),
 		.fixed_addr		=	fixed_addr_,
 		.retry_times	=	retry_times_,
+		.tracing		=	&tracing_,
 	};
-	ns_policy_ = ns->get_policy(uri_.host ? uri_.host : "");
+
+	if (!ns_policy_)
+	{
+		WFNameService *ns = WFGlobal::get_name_service();
+		ns_policy_ = ns->get_policy(uri_.host ? uri_.host : "");
+	}
+
 	return ns_policy_->create_router_task(&params, cb);
 }
 
@@ -390,10 +357,7 @@ void WFComplexClientTask<REQ, RESP, CTX>::router_callback(WFRouterTask *task)
 {
 	this->state = task->get_state();
 	if (this->state == WFT_STATE_SUCCESS)
-	{
 		route_result_ = std::move(*task->get_result());
-		cookie_ = task->get_cookie();
-	}
 	else if (this->state == WFT_STATE_UNDEFINED)
 	{
 		/* should not happend */
@@ -474,9 +438,9 @@ SubTask *WFComplexClientTask<REQ, RESP, CTX>::done()
 	if (ns_policy_ && route_result_.request_object)
 	{
 		if (this->state == WFT_STATE_SYS_ERROR)
-			ns_policy_->failed(&route_result_, cookie_, this->target);
+			ns_policy_->failed(&route_result_, &tracing_, this->target);
 		else
-			ns_policy_->success(&route_result_, cookie_, this->target);
+			ns_policy_->success(&route_result_, &tracing_, this->target);
 	}
 
 	if (this->state == WFT_STATE_SUCCESS)
@@ -489,6 +453,9 @@ SubTask *WFComplexClientTask<REQ, RESP, CTX>::done()
 		if (retry_times_ < retry_max_)
 		{
 			redirect_ = true;
+			if (ns_policy_)
+				route_result_.clear();
+
 			this->state = WFT_STATE_UNDEFINED;
 			this->error = 0;
 			this->timeout_reason = 0;
@@ -506,7 +473,9 @@ SubTask *WFComplexClientTask<REQ, RESP, CTX>::done()
 		auto&& cb = std::bind(&WFComplexClientTask::switch_callback,
 							  this,
 							  std::placeholders::_1);
-		WFTimerTask *timer = WFTaskFactory::create_timer_task(0, std::move(cb));
+		WFTimerTask *timer;
+
+		timer = WFTaskFactory::create_timer_task(0, 0, std::move(cb));
 		series->push_front(timer);
 	}
 	else
@@ -536,7 +505,7 @@ WFNetworkTaskFactory<REQ, RESP>::create_client_task(TransportType type,
 	url += buf;
 	URIParser::parse(url, uri);
 	task->init(std::move(uri));
-	task->set_type(type);
+	task->set_transport_type(type);
 	return task;
 }
 
@@ -552,7 +521,7 @@ WFNetworkTaskFactory<REQ, RESP>::create_client_task(TransportType type,
 
 	URIParser::parse(url, uri);
 	task->init(std::move(uri));
-	task->set_type(type);
+	task->set_transport_type(type);
 	return task;
 }
 
@@ -566,7 +535,7 @@ WFNetworkTaskFactory<REQ, RESP>::create_client_task(TransportType type,
 	auto *task = new WFComplexClientTask<REQ, RESP>(retry_max, std::move(callback));
 
 	task->init(uri);
-	task->set_type(type);
+	task->set_transport_type(type);
 	return task;
 }
 
@@ -590,15 +559,6 @@ public:
 					std::function<void (WFMySQLTask *)>& process);
 };
 
-/**********Template Network Factory Sepcial**********/
-/*
-template<>
-inline WFHttpTask *
-WFNetworkTaskFactory<HttpRequest, HttpResponse>::create_server_task(std::function<void (WFHttpTask *)>& process)
-{
-	return WFServerTaskFactory::create_http_task(process);
-}
-*/
 /**********Template Thread Task Factory**********/
 
 template<class INPUT, class OUTPUT>

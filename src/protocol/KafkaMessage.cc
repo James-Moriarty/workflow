@@ -795,7 +795,7 @@ static int uncompress_buf(void *buf, size_t size, KafkaBlock *block,
 static int append_message_set(KafkaBlock *block,
 							  const KafkaRecord *record,
 							  int offset, int msg_version,
-							  const KafkaConfig& config, void *env, 
+							  const KafkaConfig& config, void *env,
 							  int cur_msg_size)
 {
 	const void *key;
@@ -811,7 +811,7 @@ static int append_message_set(KafkaBlock *block,
 	if (msg_version == 1)
 		message_size += 8;
 
-	int max_msg_size = std::min(config.get_produce_msgset_max_bytes(), 
+	int max_msg_size = std::min(config.get_produce_msgset_max_bytes(),
 								config.get_produce_msg_max_bytes());
 	if (message_size + 8 + 4 + cur_msg_size > max_msg_size)
 		return 1;
@@ -906,7 +906,7 @@ static int append_batch_record(KafkaBlock *block,
 	std::string length_str;
 	append_varint_i32(length_str, length);
 
-	int max_msg_size = std::min(config.get_produce_msgset_max_bytes(), 
+	int max_msg_size = std::min(config.get_produce_msgset_max_bytes(),
 								config.get_produce_msg_max_bytes());
 	if ((int)(length + length_str.size() + cur_msg_size) > max_msg_size)
 		return 1;
@@ -1140,7 +1140,7 @@ static int parse_varint_u64(void **buf, size_t *size, uint64_t *val)
 	return 0;
 }
 
-int KafkaMessage::parse_message_set(void **buf, size_t *size, 
+int KafkaMessage::parse_message_set(void **buf, size_t *size,
 									bool check_crcs, int msg_vers,
 									struct list_head *record_list,
 									KafkaBuffer *uncompressed,
@@ -1266,7 +1266,7 @@ int KafkaMessage::parse_message_set(void **buf, size_t *size,
 
 	if (*size > 0)
 	{
-		return parse_message_set(buf, size, check_crcs, msg_vers, 
+		return parse_message_set(buf, size, check_crcs, msg_vers,
 								 record_list, uncompressed, toppar);
 	}
 
@@ -1385,7 +1385,7 @@ int KafkaMessage::parse_message_record(void **buf, size_t *size,
 	return 0;
 }
 
-int KafkaMessage::parse_record_batch(void **buf, size_t *size, 
+int KafkaMessage::parse_record_batch(void **buf, size_t *size,
 									 bool check_crcs,
 									 struct list_head *record_list,
 									 KafkaBuffer *uncompressed,
@@ -1526,7 +1526,7 @@ int KafkaMessage::parse_records(void **buf, size_t *size, bool check_crcs,
 		{
 		case 0:
 		case 1:
-			ret = parse_message_set(buf, &msg_size, check_crcs, 
+			ret = parse_message_set(buf, &msg_size, check_crcs,
 									magic, record_list,
 									uncompressed, toppar);
 			break;
@@ -1693,7 +1693,7 @@ int KafkaMessage::encode_message(int api_type, struct iovec vectors[], int max)
 	return it->second(vectors, max);
 }
 
-static int kafka_get_api_version(KafkaBroker& broker, const KafkaConfig& conf,
+static int kafka_get_api_version(const kafka_api_t *api, const KafkaConfig& conf,
 								 int api_type, int mvers, int message_version)
 {
 	int min_vers = 0;
@@ -1709,8 +1709,7 @@ static int kafka_get_api_version(KafkaBroker& broker, const KafkaConfig& conf,
 			min_vers = 7;
 	}
 
-	return kafka_broker_get_api_version(broker.get_raw_ptr(),
-										api_type, min_vers, mvers);
+	return kafka_broker_get_api_version(api, api_type, min_vers, mvers);
 }
 
 int KafkaMessage::encode_head()
@@ -1719,28 +1718,28 @@ int KafkaMessage::encode_head()
 		this->api_version = 0;
 	else
 	{
-		if (this->broker.get_features() & KAFKA_FEATURE_MSGVER2)
+		if (this->api->features & KAFKA_FEATURE_MSGVER2)
 			this->message_version = 2;
-		else if (this->broker.get_features() & KAFKA_FEATURE_MSGVER1)
+		else if (this->api->features & KAFKA_FEATURE_MSGVER1)
 			this->message_version = 1;
 		else
 			this->message_version = 0;
 
 		if (this->config.get_compress_type() == Kafka_Lz4 &&
-			!(this->broker.get_features() & KAFKA_FEATURE_LZ4))
+			!(this->api->features & KAFKA_FEATURE_LZ4))
 		{
 			this->config.set_compress_type(Kafka_NoCompress);
 		}
 
 		if (this->config.get_compress_type() == Kafka_Zstd &&
-			!(this->broker.get_features() & KAFKA_FEATURE_ZSTD))
+			!(this->api->features & KAFKA_FEATURE_ZSTD))
 		{
 			this->config.set_compress_type(Kafka_NoCompress);
 		}
 
 		int mver = this->api_mver_map[this->api_type];
 
-		this->api_version = kafka_get_api_version(this->broker, this->config,
+		this->api_version = kafka_get_api_version(this->api, this->config,
 												  this->api_type, mver,
 												  this->message_version);
 	}
@@ -1752,7 +1751,7 @@ int KafkaMessage::encode_head()
 	append_i16(this->headbuf, this->api_type);
 	append_i16(this->headbuf, this->api_version);
 	append_i32(this->headbuf, 0);
-	append_nullable_string(this->headbuf, this->config.get_client_id());
+	append_string(this->headbuf, this->config.get_client_id());
 
 	return 0;
 }
@@ -2059,6 +2058,8 @@ KafkaRequest::KafkaRequest()
 	this->encode_func_map[Kafka_ListOffsets] = std::bind(&KafkaRequest::encode_listoffset, this, _1, _2);
 	this->encode_func_map[Kafka_LeaveGroup] = std::bind(&KafkaRequest::encode_leavegroup, this, _1, _2);
 	this->encode_func_map[Kafka_ApiVersions] = std::bind(&KafkaRequest::encode_apiversions, this, _1, _2);
+	this->encode_func_map[Kafka_SaslHandshake] = std::bind(&KafkaRequest::encode_saslhandshake, this, _1, _2);
+	this->encode_func_map[Kafka_SaslAuthenticate] = std::bind(&KafkaRequest::encode_saslauthenticate, this, _1, _2);
 
 	this->api_mver_map[Kafka_Metadata] = 4;
 	this->api_mver_map[Kafka_Produce] = 7;
@@ -2072,6 +2073,8 @@ KafkaRequest::KafkaRequest()
 	this->api_mver_map[Kafka_ListOffsets] = 1;
 	this->api_mver_map[Kafka_LeaveGroup] = 1;
 	this->api_mver_map[Kafka_ApiVersions] = 0;
+	this->api_mver_map[Kafka_SaslHandshake] = 1;
+	this->api_mver_map[Kafka_SaslAuthenticate] = 0;
 }
 
 int KafkaRequest::encode_produce(struct iovec vectors[], int max)
@@ -2106,7 +2109,7 @@ int KafkaRequest::encode_produce(struct iovec vectors[], int max)
 			return -1;
 		}
 
-		void *recordset_size_ptr = (void *)((char *)header_block.get_block() + 
+		void *recordset_size_ptr = (void *)((char *)header_block.get_block() +
 											header_block.get_len() - 4);
 
 		int64_t first_timestamp = 0;
@@ -2134,7 +2137,7 @@ int KafkaRequest::encode_produce(struct iovec vectors[], int max)
 			if (batch_cnt == 0)
 			{
 				if (kafka_compress_prepare(this->config.get_compress_type(),
-										   &this->compress_env, 
+										   &this->compress_env,
 										   &compress_block) < 0)
 				{
 					return -1;
@@ -2145,7 +2148,7 @@ int KafkaRequest::encode_produce(struct iovec vectors[], int max)
 
 			int ret = append_record(&record_block, record, batch_cnt,
 									this->message_version, this->config,
-									first_timestamp, this->compress_env, 
+									first_timestamp, this->compress_env,
 									batch_length);
 
 			if (ret < 0)
@@ -2685,7 +2688,7 @@ int KafkaRequest::encode_offsetcommit(struct iovec vectors[], int max)
 		append_i32(this->msgbuf, toppar->get_partition());
 		append_i64(this->msgbuf, toppar->get_offset() + 1);
 
-		if (this->api_version > 6)
+		if (this->api_version >= 6)
 			append_i32(this->msgbuf, -1);
 
 		if (this->api_version == 1)
@@ -2726,6 +2729,28 @@ int KafkaRequest::encode_apiversions(struct iovec vectors[], int max)
 	return 0;
 }
 
+int KafkaRequest::encode_saslhandshake(struct iovec vectors[], int max)
+{
+	append_string(this->msgbuf, this->config.get_sasl_mech());
+
+	this->cur_size = this->msgbuf.size();
+
+	vectors[0].iov_base = (void *)this->msgbuf.c_str();
+	vectors[0].iov_len = this->msgbuf.size();
+	return 1;
+}
+
+int KafkaRequest::encode_saslauthenticate(struct iovec vectors[], int max)
+{
+	append_bytes(this->msgbuf, this->sasl->buf, this->sasl->bsize);
+
+	this->cur_size = this->msgbuf.size();
+
+	vectors[0].iov_base = (void *)this->msgbuf.c_str();
+	vectors[0].iov_len = this->msgbuf.size();
+	return 1;
+}
+
 KafkaResponse::KafkaResponse()
 {
 	using namespace std::placeholders;
@@ -2741,6 +2766,8 @@ KafkaResponse::KafkaResponse()
 	this->parse_func_map[Kafka_ListOffsets] = std::bind(&KafkaResponse::parse_listoffset, this, _1, _2);
 	this->parse_func_map[Kafka_LeaveGroup] = std::bind(&KafkaResponse::parse_leavegroup, this, _1, _2);
 	this->parse_func_map[Kafka_ApiVersions] = std::bind(&KafkaResponse::parse_apiversions, this, _1, _2);
+	this->parse_func_map[Kafka_SaslHandshake] = std::bind(&KafkaResponse::parse_saslhandshake, this, _1, _2);
+	this->parse_func_map[Kafka_SaslAuthenticate] = std::bind(&KafkaResponse::parse_saslauthenticate, this, _1, _2);
 }
 
 int KafkaResponse::parse_response()
@@ -2842,37 +2869,26 @@ static bool kafka_broker_get_leader(int leader_id, KafkaBrokerList *broker_list,
 			char *host = strdup(broker->host);
 			if (host)
 			{
-				size_t api_elem_size = sizeof(kafka_api_version_t) * broker->api_elements;
-				kafka_api_version_t *api = (kafka_api_version_t *)malloc(api_elem_size);
-				if (api)
+				char *rack;
+				if (broker->rack)
+					rack = strdup(broker->rack);
+
+				if (!broker->rack || rack)
 				{
-					char *rack;
 					if (broker->rack)
-						rack = strdup(broker->rack);
+						leader->rack = rack;
 
-					if (!broker->rack || rack)
-					{
-						if (broker->rack)
-							leader->rack = rack;
-
-						leader->to_addr = broker->to_addr;
-						memcpy(&leader->addr, &broker->addr, sizeof(struct sockaddr_storage));
-						leader->addrlen = broker->addrlen;
-						leader->features = broker->features;
-						memcpy(api, broker->api, api_elem_size);
-						leader->api_elements = broker->api_elements;
-						leader->host = host;
-						leader->api = api;
-						return true;
-					}
-
-					free(api);
+					leader->to_addr = broker->to_addr;
+					memcpy(&leader->addr, &broker->addr, sizeof(struct sockaddr_storage));
+					leader->addrlen = broker->addrlen;
+					leader->host = host;
+					return true;
 				}
 
 				free(host);
 			}
 
-            return false;
+			return false;
 		}
 	}
 
@@ -3007,7 +3023,6 @@ static int kafka_meta_parse_topic(void **buf, size_t *size,
 
 int KafkaResponse::parse_metadata(void **buf, size_t *size)
 {
-
 	int throttle_time, controller_id;
 	std::string cluster_id;
 
@@ -3403,7 +3418,7 @@ static int kafka_cgroup_parse_member(void **buf, size_t *size,
 			KafkaToppar * toppar = new KafkaToppar;
 			if (!toppar->set_topic(topic_name.c_str()))
 			{
-				free(toppar);
+				delete toppar;
 				break;
 			}
 
@@ -3577,7 +3592,11 @@ int KafkaResponse::parse_offsetfetch(void **buf, size_t *size)
 
 			kafka_topic_partition_t *ptr = toppar->get_raw_ptr();
 
-			CHECK_RET(parse_i64(buf, size, (int64_t *)&ptr->offset));
+			long offset;
+			CHECK_RET(parse_i64(buf, size, (int64_t *)&offset));
+			if (this->config.get_offset_store() != KAFKA_OFFSET_ASSIGN)
+				ptr->offset = offset;
+
 			CHECK_RET(parse_string(buf, size, &ptr->committed_metadata));
 			CHECK_RET(parse_i16(buf, size, &ptr->error));
 		}
@@ -3652,7 +3671,6 @@ static bool kafka_api_version_cmp(const kafka_api_version_t& api_ver1,
 
 int KafkaResponse::parse_apiversions(void **buf, size_t *size)
 {
-	kafka_broker_t *ptr = this->broker.get_raw_ptr();
 	short error;
 	int api_cnt;
 	int throttle_time;
@@ -3666,22 +3684,154 @@ int KafkaResponse::parse_apiversions(void **buf, size_t *size)
 		return -1;
 	}
 
-	if (!this->broker.allocate_api_version(api_cnt))
+	void *p = malloc(api_cnt * sizeof(kafka_api_version_t));
+	if (!p)
 		return -1;
+
+	this->api->api = (kafka_api_version_t *)p;
+	this->api->elements = api_cnt;
 
 	for (int i = 0; i < api_cnt; ++i)
 	{
-		CHECK_RET(parse_i16(buf, size, &ptr->api[i].api_key));
-		CHECK_RET(parse_i16(buf, size, &ptr->api[i].min_ver));
-		CHECK_RET(parse_i16(buf, size, &ptr->api[i].max_ver));
+		CHECK_RET(parse_i16(buf, size, &this->api->api[i].api_key));
+		CHECK_RET(parse_i16(buf, size, &this->api->api[i].min_ver));
+		CHECK_RET(parse_i16(buf, size, &this->api->api[i].max_ver));
 	}
 
 	if (this->api_version >= 1)
 		CHECK_RET(parse_i32(buf, size, &throttle_time));
 
-	std::sort(ptr->api, ptr->api + api_cnt, kafka_api_version_cmp);
-	this->broker.set_feature(kafka_get_features(ptr->api, ptr->api_elements));
+	std::sort(this->api->api, this->api->api + api_cnt, kafka_api_version_cmp);
+	this->api->features = kafka_get_features(this->api->api, api_cnt);
 	return 0;
 }
 
+int KafkaResponse::parse_saslhandshake(void **buf, size_t *size)
+{
+	std::string mechanism;
+	int cnt, i;
+	short error;
+
+	CHECK_RET(parse_i16(buf, size, &error));
+	if (error != 0)
+	{
+		errno = EBADMSG;
+		return -1;
+	}
+
+	CHECK_RET(parse_i32(buf, size, &cnt));
+
+	for (i = 0; i < cnt; i++)
+	{
+		CHECK_RET(parse_string(buf, size, mechanism));
+
+		if (strcasecmp(mechanism.c_str(), this->config.get_sasl_mech()) == 0)
+			break;
+	}
+
+	if (i >= cnt)
+	{
+		errno = EBADMSG;
+		return -1;
+	}
+
+	if (!this->config.new_client(this->sasl))
+	{
+		this->broker.get_raw_ptr()->error = KAFKA_SASL_AUTHENTICATION_FAILED;
+		errno = EBADMSG;
+		return -1;
+	}
+
+	return 0;
 }
+
+int KafkaResponse::parse_saslauthenticate(void **buf, size_t *size)
+{
+	std::string error_message;
+	short error;
+
+	CHECK_RET(parse_i16(buf, size, &error));
+	CHECK_RET(parse_string(buf, size, error_message));
+
+	if (error != 0)
+	{
+		errno = EBADMSG;
+		return -1;
+	}
+
+	std::string auth_bytes;
+	CHECK_RET(parse_bytes(buf, size, auth_bytes));
+	if (this->config.get_raw_ptr()->recv(auth_bytes.c_str(),
+										 auth_bytes.size(),
+										 this->config.get_raw_ptr(),
+										 this->sasl) != 0)
+	{
+		this->broker.get_raw_ptr()->error = KAFKA_SASL_AUTHENTICATION_FAILED;
+		errno = EBADMSG;
+		return -1;
+	}
+
+	return 0;
+}
+
+int KafkaResponse::handle_sasl_continue()
+{
+	struct iovec iovecs[64];
+	int ret;
+	int cnt = this->encode(iovecs, 64);
+	if ((unsigned int)cnt > 64)
+	{
+		if (cnt > 64)
+			errno = EOVERFLOW;
+		return -1;
+	}
+
+	for (int i = 0; i < cnt; i++)
+	{
+		ret = this->feedback(iovecs[i].iov_base, iovecs[i].iov_len);
+		if (ret != (int)iovecs[i].iov_len)
+		{
+			if (ret > 0)
+				errno = EAGAIN;
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+int KafkaResponse::append(const void *buf, size_t *size)
+{
+	int ret = KafkaMessage::append(buf, size);
+
+	if (ret == 1)
+	{
+		if (this->parse_response() == 0)
+		{
+			if (this->api_type == Kafka_SaslHandshake)
+			{
+				this->api_type = Kafka_SaslAuthenticate;
+				this->clear_buf();
+				ret = this->handle_sasl_continue();
+			}
+			else if (this->api_type == Kafka_SaslAuthenticate)
+			{
+				if (strncasecmp(this->config.get_sasl_mech(), "SCRAM", 5) == 0)
+				{
+					this->clear_buf();
+					if (this->sasl->scram.state != -1)
+						ret = this->handle_sasl_continue();
+					else
+						this->sasl->status = 1;
+				}
+			}
+		}
+		else
+			ret = -1;
+	}
+
+	return ret;
+}
+
+}
+

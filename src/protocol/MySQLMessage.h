@@ -45,7 +45,7 @@ public:
 protected:
 	virtual int append(const void *buf, size_t *size);
 	virtual int encode(struct iovec vectors[], int max);
-	virtual int decode_packet(const char *buf, size_t buflen) { return 1; }
+	virtual int decode_packet(const unsigned char *buf, size_t buflen) { return 1; }
 
 	void set_command(int cmd) const;
 
@@ -54,7 +54,7 @@ protected:
 	mysql_parser_t *parser_;
 
 	//encode
-	char heads_[256][4];
+	unsigned char heads_[256][4];
 	uint8_t seqid_;
 	std::string buf_;
 	size_t cur_size_;
@@ -96,7 +96,6 @@ public:
 	unsigned long long get_affected_rows() const;
 	unsigned long long get_last_insert_id() const;
 	int get_warnings() const;
-	int get_status_flags() const;
 	int get_error_code() const;
 	std::string get_error_msg() const;
 	std::string get_sql_state() const;
@@ -112,7 +111,7 @@ public:
 	MySQLResponse& operator= (MySQLResponse&& move) = default;
 
 protected:
-	virtual int decode_packet(const char *buf, size_t buflen);
+	virtual int decode_packet(const unsigned char *buf, size_t buflen);
 };
 
 }

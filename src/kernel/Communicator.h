@@ -31,8 +31,9 @@
 
 class CommConnection
 {
-public:
+protected:
 	virtual ~CommConnection() { }
+	friend class Communicator;
 };
 
 class CommTarget
@@ -49,12 +50,17 @@ public:
 		*addrlen = this->addrlen;
 	}
 
+	int get_connect_timeout() const { return this->connect_timeout; }
+	int get_response_timeout() const { return this->response_timeout; }
+
 protected:
 	void set_ssl(SSL_CTX *ssl_ctx, int ssl_connect_timeout)
 	{
 		this->ssl_ctx = ssl_ctx;
 		this->ssl_connect_timeout = ssl_connect_timeout;
 	}
+
+	SSL_CTX *get_ssl_ctx() const { return this->ssl_ctx; }
 
 private:
 	virtual int create_connect_fd()
@@ -67,8 +73,10 @@ private:
 		return new CommConnection;
 	}
 
+	virtual int init_ssl(SSL *ssl) { return 0; }
+
 public:
-	virtual void release() { }
+	virtual void release(int keep_alive) { }
 
 private:
 	struct sockaddr *addr;
@@ -105,7 +113,7 @@ private:
 
 protected:
 	/* Send small packet while receiving. Call only in append(). */
-	int feedback(const char *buf, size_t size);
+	virtual int feedback(const void *buf, size_t size);
 
 private:
 	struct CommConnEntry *entry;
@@ -130,6 +138,10 @@ private:
 	virtual int keep_alive_timeout() { return 0; }
 	virtual int first_timeout() { return 0; }	/* for client session only. */
 	virtual void handle(int state, int error) = 0;
+
+private:
+	virtual int connect_timeout() { return this->target->connect_timeout; }
+	virtual int response_timeout() { return this->target->response_timeout; }
 
 protected:
 	CommTarget *get_target() const { return this->target; }
@@ -179,6 +191,8 @@ protected:
 		this->ssl_accept_timeout = ssl_accept_timeout;
 	}
 
+	SSL_CTX *get_ssl_ctx() const { return this->ssl_ctx; }
+
 private:
 	virtual CommSession *new_session(long long seq, CommConnection *conn) = 0;
 	virtual void handle_stop(int error) { }
@@ -194,6 +208,8 @@ private:
 	{
 		return new CommConnection;
 	}
+
+	virtual int init_ssl(SSL *ssl) { return 0; }
 
 private:
 	struct sockaddr *bind_addr;

@@ -21,7 +21,7 @@ if (WIN32)
 	set(INCLUDE_KERNEL_HEADERS
 		src/kernel_win/list.h
 	)
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
 	set(INCLUDE_KERNEL_HEADERS
 		${COMMON_KERNEL_HEADERS}
 		src/kernel/IOService_linux.h
@@ -36,7 +36,7 @@ else ()
 endif ()
 
 set(INCLUDE_HEADERS
-	src/algorithm/DNSRoutine.h
+	src/algorithm/DnsRoutine.h
 	src/algorithm/MapReduce.h
 	src/algorithm/MapReduce.inl
 	src/protocol/ProtocolMessage.h
@@ -53,12 +53,18 @@ set(INCLUDE_HEADERS
 	src/protocol/mysql_parser.h
 	src/protocol/mysql_types.h
 	src/protocol/mysql_byteorder.h
+	src/protocol/SSLWrapper.h
+	src/protocol/dns_parser.h
+	src/protocol/DnsMessage.h
+	src/protocol/DnsUtil.h
 	src/server/WFServer.h
+	src/server/WFDnsServer.h
 	src/server/WFHttpServer.h
 	src/server/WFRedisServer.h
 	src/server/WFMySQLServer.h
 	src/client/WFMySQLConnection.h
-	src/manager/DNSCache.h
+	src/client/WFDnsClient.h
+	src/manager/DnsCache.h
 	src/manager/WFGlobal.h
 	src/manager/UpstreamManager.h
 	src/manager/RouteManager.h
@@ -66,7 +72,6 @@ set(INCLUDE_HEADERS
 	src/manager/WFFuture.h
 	src/manager/WFFacilities.h
 	src/manager/WFFacilities.inl
-	src/manager/UpstreamPolicies.h
 	src/util/EncodeStream.h
 	src/util/LRUCache.h
 	src/util/StringUtil.h
@@ -83,8 +88,11 @@ set(INCLUDE_HEADERS
 	src/factory/WFAlgoTaskFactory.inl
 	src/factory/Workflow.h
 	src/factory/WFOperator.h
-	src/factory/WFNameService.h
-	src/factory/WFDNSResolver.h
+	src/factory/WFResourcePool.h
+	src/nameservice/WFNameService.h
+	src/nameservice/WFDnsResolver.h
+	src/nameservice/WFServiceGovernance.h
+	src/nameservice/UpstreamPolicies.h
 )
 
 if(KAFKA STREQUAL "y")

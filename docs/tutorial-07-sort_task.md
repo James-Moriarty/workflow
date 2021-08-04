@@ -1,7 +1,7 @@
 # 使用内置算法工厂：sort_task
 # 示例代码
 
-[tutorial-07-sort_task.cc](../tutorial/tutorial-07-sort_task.cc)
+[tutorial-07-sort_task.cc](/tutorial/tutorial-07-sort_task.cc)
 
 # 关于sort_task
 
@@ -60,7 +60,7 @@ void callback(void SortTask<int> *task)
         if (use_parallel_sort)
             reverse = WFAlgoTaskFactory::create_psort_task("sort", first, last, cmp, callback);
         else
-            reverse = WFAlgoTaskFactory::create_psort_task("sort", first, last, cmp, callback);
+            reverse = WFAlgoTaskFactory::create_sort_task("sort", first, last, cmp, callback);
             
         reverse->user_data = (void *)1; /* as a flag */
         series_of(task)->push_back(reverse);

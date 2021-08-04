@@ -34,13 +34,14 @@
 #include "WFGlobal.h"
 #include "EndpointParams.h"
 #include "CommScheduler.h"
-#include "DNSCache.h"
+#include "DnsCache.h"
 #include "RouteManager.h"
 #include "Executor.h"
 #include "WFTask.h"
 #include "WFTaskError.h"
 #include "WFNameService.h"
-#include "WFDNSResolver.h"
+#include "WFDnsResolver.h"
+#include "WFDnsClient.h"
 
 class __WFGlobal
 {
@@ -61,19 +62,22 @@ public:
 		settings_ = *settings;
 	}
 
-	const char *get_default_port(const std::string& scheme) const
+	const char *get_default_port(const std::string& scheme)
 	{
 		const auto it = static_scheme_port_.find(scheme);
 
 		if (it != static_scheme_port_.end())
 			return it->second;
 
+		const char *port = NULL;
+		user_scheme_port_mutex_.lock();
 		const auto it2 = user_scheme_port_.find(scheme);
 
 		if (it2 != user_scheme_port_.end())
-			return it2->second.c_str();
+			port = it2->second.c_str();
 
-		return NULL;
+		user_scheme_port_mutex_.unlock();
+		return port;
 	}
 
 	void register_scheme_port(const std::string& scheme, unsigned short port)
@@ -119,6 +123,15 @@ private:
 
 __WFGlobal::__WFGlobal() : settings_(GLOBAL_SETTINGS_DEFAULT)
 {
+	static_scheme_port_["dns"] = "53";
+	static_scheme_port_["Dns"] = "53";
+	static_scheme_port_["DNS"] = "53";
+
+	static_scheme_port_["dnss"] = "853";
+	static_scheme_port_["Dnss"] = "853";
+	static_scheme_port_["DNSs"] = "853";
+	static_scheme_port_["DNSS"] = "853";
+
 	static_scheme_port_["http"] = "80";
 	static_scheme_port_["Http"] = "80";
 	static_scheme_port_["HTTP"] = "80";
@@ -142,6 +155,13 @@ __WFGlobal::__WFGlobal() : settings_(GLOBAL_SETTINGS_DEFAULT)
 	static_scheme_port_["MySql"] = "3306";
 	static_scheme_port_["MySQL"] = "3306";
 	static_scheme_port_["MYSQL"] = "3306";
+
+	static_scheme_port_["mysqls"] = "3306";
+	static_scheme_port_["Mysqls"] = "3306";
+	static_scheme_port_["MySqls"] = "3306";
+	static_scheme_port_["MySQLs"] = "3306";
+	static_scheme_port_["MYSQLs"] = "3306";
+	static_scheme_port_["MYSQLS"] = "3306";
 
 	static_scheme_port_["kafka"] = "9092";
 	static_scheme_port_["Kafka"] = "9092";
@@ -173,7 +193,7 @@ public:
 	}
 
 	SSL_CTX *get_ssl_client_ctx() { return ssl_client_ctx_; }
-	SSL_CTX *get_ssl_server_ctx() { return ssl_server_ctx_; }
+	SSL_CTX *new_ssl_server_ctx() { return SSL_CTX_new(SSLv23_server_method()); }
 
 private:
 	__SSLManager()
@@ -189,14 +209,11 @@ private:
 
 		ssl_client_ctx_ = SSL_CTX_new(SSLv23_client_method());
 		assert(ssl_client_ctx_ != NULL);
-		ssl_server_ctx_ = SSL_CTX_new(SSLv23_server_method());
-		assert(ssl_server_ctx_ != NULL);
 	}
 
 	~__SSLManager()
 	{
 		SSL_CTX_free(ssl_client_ctx_);
-		SSL_CTX_free(ssl_server_ctx_);
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
 		//free ssl to avoid memory leak
@@ -224,7 +241,6 @@ private:
 
 private:
 	SSL_CTX *ssl_client_ctx_;
-	SSL_CTX *ssl_server_ctx_;
 };
 
 class IOServer : public IOService
@@ -279,13 +295,13 @@ private:
 	bool flag_;
 };
 
-class __DNSManager
+class __DnsManager
 {
 public:
 	ExecQueue *get_dns_queue() { return &dns_queue_; }
 	Executor *get_dns_executor() { return &dns_executor_; }
 
-	__DNSManager()
+	__DnsManager()
 	{
 		int ret;
 
@@ -300,7 +316,7 @@ public:
 			abort();
 	}
 
-	~__DNSManager()
+	~__DnsManager()
 	{
 		dns_executor_.deinit();
 		dns_queue_.deinit();
@@ -384,14 +400,14 @@ private:
 		}
 	}
 
-	__DNSManager *get_dns_manager_safe()
+	__DnsManager *get_dns_manager_safe()
 	{
 		if (!dns_flag_)
 		{
 			dns_mutex_.lock();
 			if (!dns_flag_)
 			{
-				dns_manager_ = new __DNSManager();
+				dns_manager_ = new __DnsManager();
 				dns_flag_ = true;
 			}
 
@@ -407,29 +423,29 @@ private:
 	IOServer *io_server_;
 	volatile bool io_flag_;
 	std::mutex io_mutex_;
-	__DNSManager *dns_manager_;
+	__DnsManager *dns_manager_;
 	volatile bool dns_flag_;
 	std::mutex dns_mutex_;
 };
 
-class __DNSCache
+class __DnsCache
 {
 public:
-	static __DNSCache *get_instance()
+	static __DnsCache *get_instance()
 	{
-		static __DNSCache kInstance;
+		static __DnsCache kInstance;
 		return &kInstance;
 	}
 
-	DNSCache *get_dns_cache() { return &dns_cache_; }
+	DnsCache *get_dns_cache() { return &dns_cache_; }
 
 private:
-	__DNSCache() { }
+	__DnsCache() { }
 
-	~__DNSCache() { }
+	~__DnsCache() { }
 
 private:
-	DNSCache dns_cache_;
+	DnsCache dns_cache_;
 };
 
 class __ExecManager
@@ -527,26 +543,220 @@ public:
 	}
 
 public:
+	WFDnsResolver *get_dns_resolver() { return &resolver_; }
 	WFNameService *get_name_service() { return &service_; }
 
 private:
-	static WFDNSResolver resolver_;
+	WFDnsResolver resolver_;
 	WFNameService service_;
 
 public:
-	__NameServiceManager() : service_(&__NameServiceManager::resolver_) { }
+	__NameServiceManager() : service_(&resolver_) { }
 };
 
-WFDNSResolver __NameServiceManager::resolver_;
+#define MAX(x, y)	((x) >= (y) ? (x) : (y))
+#define HOSTS_LINEBUF_INIT_SIZE	128
+
+static int __read_line(FILE *fp, void **buf, size_t *bufsize)
+{
+	char *p = (char *)*buf;
+	size_t offset = 0;
+	size_t newsize;
+	void *newbase;
+	int nleft;
+
+	while (1)
+	{
+		if (offset + 1 >= *bufsize)
+		{
+			newsize = MAX(HOSTS_LINEBUF_INIT_SIZE, *bufsize * 2);
+			newbase = realloc(*buf, newsize);
+			if (!newbase)
+				return -1;
+
+			*buf = newbase;
+			*bufsize = newsize;
+			p = (char *)*buf;
+		}
+
+		nleft = *bufsize - offset;
+		if (!fgets(&p[offset], nleft, fp))
+		{
+			if (offset != 0 && !ferror(fp))
+				break;
+
+			return ferror(fp) ? -1 : 1;
+		}
+
+		offset += strlen(&p[offset]);
+		if (p[offset - 1] == '\n')
+		{
+			p[offset - 1] = '\0';
+			break;
+		}
+	}
+
+	return 0;
+}
+
+static void __split_merge_str(const char *p, std::string& result)
+{
+	const char *start;
+
+	if (!isspace(*p))
+		return;
+
+	while (1)
+	{
+		while (isspace(*p))
+			p++;
+
+		start = p;
+		while (*p && *p != '#' && *p != ';' && !isspace(*p))
+			p++;
+
+		if (start == p)
+			break;
+
+		if (!result.empty())
+			result.push_back(',');
+		result.append(start, p);
+	}
+}
+
+static inline const char *__try_options(const char *p, const char *q,
+										const char *r)
+{
+	size_t len = strlen(r);
+	if ((size_t)(q - p) >= len && strncmp(p, r, len) == 0)
+		return p + len;
+	return NULL;
+}
+
+static void __set_options(const char *p,
+						  int *ndots, int *attempts, bool *rotate)
+{
+	const char *start;
+	const char *opt;
+
+	if (!isspace(*p))
+		return;
+
+	while (1)
+	{
+		while (isspace(*p))
+			p++;
+
+		start = p;
+		while (*p && *p != '#' && *p != ';' && !isspace(*p))
+			p++;
+
+		if (start == p)
+			break;
+
+		if ((opt = __try_options(start, p, "ndots:")) != NULL)
+			*ndots = atoi(opt);
+		else if ((opt = __try_options(start, p, "attempts:")) != NULL)
+			*attempts = atoi(opt);
+		else if ((opt = __try_options(start, p, "rotate")) != NULL)
+			*rotate = true;
+	}
+}
+
+static int __parse_resolv_conf(const char *filename,
+							   std::string& url, std::string& search_list,
+							   int *ndots, int *attempts, bool *rotate)
+{
+	size_t bufsize = 0;
+	void *line = NULL;
+	FILE *fp;
+	int ret;
+
+	fp = fopen(filename, "r");
+	if (!fp)
+		return -1;
+
+	while ((ret = __read_line(fp, &line, &bufsize)) == 0)
+	{
+		const char *p = (const char *)line;
+		if (strncmp(p, "nameserver", 10) == 0)
+			__split_merge_str(p + 10, url);
+		else if (strncmp(p, "search", 6) == 0)
+			__split_merge_str(p + 6, search_list);
+		else if (strncmp(p, "options", 7) == 0)
+			__set_options(p + 7, ndots, attempts, rotate);
+	}
+
+	free(line);
+	fclose(fp);
+
+	return ret;
+}
+
+class __DnsClientManager
+{
+public:
+	static __DnsClientManager *get_instance()
+	{
+		static __DnsClientManager kInstance;
+		return &kInstance;
+	}
+
+public:
+	WFDnsClient *get_dns_client() { return client; }
+
+private:
+	__DnsClientManager()
+	{
+		const char *path = WFGlobal::get_global_settings()->resolv_conf_path;
+
+		client = NULL;
+		if (path && path[0])
+		{
+			int ndots = 1;
+			int attempts = 2;
+			bool rotate = false;
+			std::string url;
+			std::string search;
+
+			client = new WFDnsClient;
+			if (__parse_resolv_conf(path, url, search, &ndots, &attempts,
+									&rotate) >= 0)
+			{
+				if (client->init(url, search, ndots, attempts, rotate) >= 0)
+					return;
+			}
+
+			delete client;
+			abort();
+		}
+	}
+
+	~__DnsClientManager()
+	{
+		if (client)
+		{
+			client->deinit();
+			delete client;
+		}
+	}
+
+	WFDnsClient *client;
+};
+
+WFDnsClient *WFGlobal::get_dns_client()
+{
+	return __DnsClientManager::get_instance()->get_dns_client();
+}
 
 CommScheduler *WFGlobal::get_scheduler()
 {
 	return __CommManager::get_instance()->get_scheduler();
 }
 
-DNSCache *WFGlobal::get_dns_cache()
+DnsCache *WFGlobal::get_dns_cache()
 {
-	return __DNSCache::get_instance()->get_dns_cache();
+	return __DnsCache::get_instance()->get_dns_cache();
 }
 
 RouteManager *WFGlobal::get_route_manager()
@@ -559,9 +769,9 @@ SSL_CTX *WFGlobal::get_ssl_client_ctx()
 	return __SSLManager::get_instance()->get_ssl_client_ctx();
 }
 
-SSL_CTX *WFGlobal::get_ssl_server_ctx()
+SSL_CTX *WFGlobal::new_ssl_server_ctx()
 {
-	return __SSLManager::get_instance()->get_ssl_server_ctx();
+	return __SSLManager::get_instance()->new_ssl_server_ctx();
 }
 
 ExecQueue *WFGlobal::get_exec_queue(const std::string& queue_name)
@@ -592,6 +802,11 @@ Executor *WFGlobal::get_dns_executor()
 WFNameService *WFGlobal::get_name_service()
 {
 	return __NameServiceManager::get_instance()->get_name_service();
+}
+
+WFDnsResolver *WFGlobal::get_dns_resolver()
+{
+	return __NameServiceManager::get_instance()->get_dns_resolver();
 }
 
 const char *WFGlobal::get_default_port(const std::string& scheme)
@@ -697,6 +912,9 @@ static inline const char *__get_task_error_string(int error)
 	case WFT_ERR_HTTP_BAD_REDIRECT_HEADER:
 		return "Http Bad Redirect Header";
 
+	case WFT_ERR_HTTP_PROXY_CONNECT_FAILED:
+		return "Http Proxy Connect Failed";
+
 	case WFT_ERR_REDIS_ACCESS_DENIED:
 		return "Redis Access Denied";
 
@@ -717,6 +935,9 @@ static inline const char *__get_task_error_string(int error)
 
 	case WFT_ERR_MYSQL_QUERY_NOT_SET:
 		return "MySQL Query Not Set";
+
+	case WFT_ERR_MYSQL_SSL_NOT_SUPPORTED:
+		return "MySQL SSL Not Supported";
 
 	case WFT_ERR_KAFKA_PARSE_RESPONSE_FAILED:
 		return "Kafka parse response failed";

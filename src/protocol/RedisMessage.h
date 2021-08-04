@@ -14,6 +14,7 @@
   limitations under the License.
 
   Authors: Wu Jiaxu (wujiaxu@sogou-inc.com)
+           Liu Kai (liukaidx@sogou-inc.com)
 */
 
 #ifndef _REDISMESSAGE_H_
@@ -106,24 +107,6 @@ public:
 	// format data to text
 	std::string debug_string() const;
 
-public:
-	struct StatusTag {};
-	struct ErrorTag {};
-	// integer
-	RedisValue(int64_t intv);
-	// string
-	RedisValue(const char *str);
-	RedisValue(const char *str, size_t len);
-	RedisValue(const std::string& strv);
-	// status
-	RedisValue(const char *str, StatusTag status_tag);
-	RedisValue(const char *str, size_t len, StatusTag status_tag);
-	RedisValue(const std::string& strv, StatusTag status_tag);
-	// error
-	RedisValue(const char *str, ErrorTag error_tag);
-	RedisValue(const char *str, size_t len, ErrorTag error_tag);
-	RedisValue(const std::string& strv, ErrorTag error_tag);
-
 private:
 	void free_data();
 	void only_set_string_data(const std::string& strv);
@@ -148,18 +131,21 @@ public:
 	//peek after CommMessageIn append
 	//not for users.
 	bool parse_success() const;
+	bool is_asking() const;
+	void set_asking(bool asking);
 
 protected:
 	redis_parser_t *parser_;
 
-private:
 	virtual int encode(struct iovec vectors[], int max);
 	virtual int append(const void *buf, size_t *size);
+	bool encode_reply(redis_reply_t *reply);
 
 	EncodeStream *stream_;
-	size_t cur_size_;
 
-	bool encode_reply(redis_reply_t *reply);
+private:
+	size_t cur_size_;
+	bool asking_;
 };
 
 class RedisRequest : public RedisMessage
@@ -181,6 +167,10 @@ public:// C++ style
 
 	bool get_command(std::string& command) const;
 	bool get_params(std::vector<std::string>& params) const;
+
+protected:
+	virtual int encode(struct iovec vectors[], int max);
+	virtual int append(const void *buf, size_t *size);
 
 private:
 	std::vector<std::string> user_request_;
@@ -211,6 +201,9 @@ public:// C style
 	// server write data into redis_reply_t by pointer of result_ptr
 	redis_reply_t *result_ptr();
 
+protected:
+	virtual int append(const void *buf, size_t *size);
+
 private:
 	RedisValue value_;
 };
@@ -221,11 +214,6 @@ inline RedisValue::RedisValue():
 	type_(REDIS_REPLY_TYPE_NIL),
 	data_(NULL)
 {
-}
-
-inline RedisValue::~RedisValue()
-{
-	free_data();
 }
 
 inline RedisValue::RedisValue(const RedisValue& copy):
@@ -311,25 +299,11 @@ inline void RedisValue::clear()
 	set_nil();
 }
 
-inline RedisMessage::RedisMessage():
-	parser_(new redis_parser_t),
-	stream_(new EncodeStream),
-	cur_size_(0)
-{
-	redis_parser_init(parser_);
-}
-
-inline RedisMessage::~RedisMessage()
-{
-	if (parser_)
-	{
-		redis_parser_deinit(parser_);
-		delete parser_;
-		delete stream_;
-	}
-}
-
 inline bool RedisMessage::parse_success() const { return parser_->parse_succ; }
+
+inline bool RedisMessage::is_asking() const { return asking_; }
+
+inline void RedisMessage::set_asking(bool asking) { asking_ = asking; }
 
 inline redis_reply_t *RedisResponse::result_ptr()
 {

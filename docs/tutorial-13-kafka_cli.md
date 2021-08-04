@@ -1,7 +1,7 @@
 # 异步Kafka客户端：kafka_cli
 # 示例代码
 
-[tutorial-13-kafka_cli.cc](../tutorial/tutorial-13-kafka_cli.cc)
+[tutorial-13-kafka_cli.cc](/tutorial/tutorial-13-kafka_cli.cc)
 
 # 关于编译选项
 
@@ -98,6 +98,10 @@ broker_version | char * | NULL | 指定broker的版本号，<0.10时需要手动
 compress_type | int | NoCompress | produce消息的压缩类型
 client_id | char * | NULL | 表示client的id
 check_crcs | bool | false | fetch任务中是否校验消息的crc32
+offset_store | int | 0 | 加入消费者组时，是否使用上次提交offset，1表示使用指定的offset，0表示优先使用上次提交
+sasl_mechanisms | char * | NULL | sasl认证类型，目前支持plain和scram
+sasl_username | char * | NULL | sasl认证所需的username
+sasl_password | char * | NULL | sasl认证所需的password
 
 
 最后就可以调用start接口启动kafka任务。
@@ -297,6 +301,27 @@ void kafka_callback(WFKafkaTask *task)
 			}
 		}
 	}
+	...
+}
+~~~
+
+# 认证
+认证信息需要在配置中设置，以sasl为例:
+~~~cpp
+int main(int argc, char *argv[])
+{
+	...
+	client = new WFKafkaClient();
+	client->init(url);
+
+	task = client->create_kafka_task("api=fetch&topic=xxx&topic=yyy", 3, kafka_callback);
+	config.set_sasl_username("fetch");
+	config.set_sasl_password("fetch-secret");
+	config.set_sasl_mech("SCRAM-SHA-256");
+	task->set_config(std::move(config));
+
+	...
+	task->start();
 	...
 }
 ~~~

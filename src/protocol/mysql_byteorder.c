@@ -18,15 +18,15 @@
 
 #include "mysql_byteorder.h"
 
-int decode_length_safe(unsigned long long *res, const char **pos, const char *end)
+int decode_length_safe(unsigned long long *res, const unsigned char **pos,
+					   const unsigned char *end)
 {
-	//const unsigned char *p = (const unsigned char *)*pos;
-	const char *p = *pos;
+	const unsigned char *p = *pos;
 
-	switch (*(const unsigned char *)p)
+	switch (*p)
 	{
 	default:
-		*res = *(const unsigned char *)p;
+		*res = *p;
 		*pos = p + 1;
 		break;
 
@@ -55,20 +55,23 @@ int decode_length_safe(unsigned long long *res, const char **pos, const char *en
 		if (p + 8 > end)
 			return 0;
 
-		*res = uint4korr(p + 1);
+		*res = uint8korr(p + 1);
 		*pos = p + 9;
 		break;
+
+	case 255:
+		return -1;
 	}
 
 	return 1;
 }
 
-int decode_string(const char **str, unsigned long long *len,
-				  const char **pos, const char *end)
+int decode_string(const unsigned char **str, unsigned long long *len,
+				  const unsigned char **pos, const unsigned char *end)
 {
 	unsigned long long length;
 
-	if (decode_length_safe(&length, pos, end) == 0)
+	if (decode_length_safe(&length, pos, end) <= 0)
 		return 0;
 
 	if (length == 0 || length == (~0ULL))

@@ -125,8 +125,6 @@ public:
 
 	int init(const std::string& broker_url, const std::string& group);
 
-	void set_heartbeat_interval(size_t interval_ms);
-
 	void deinit();
 
 	// example: topic=xxx&topic=yyy&api=fetch
@@ -139,7 +137,7 @@ public:
 
 public:
 	/* If you don't leavegroup manually, rebalance would be triggered */
-	WFKafkaTask *create_leavegroup_task(int retry_max, 
+	WFKafkaTask *create_leavegroup_task(int retry_max,
 										kafka_callback_t callback);
 
 public:
@@ -155,3 +153,4 @@ private:
 };
 
 #endif
+

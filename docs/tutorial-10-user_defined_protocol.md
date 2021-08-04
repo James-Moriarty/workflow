@@ -1,10 +1,10 @@
 # 简单的用户自定义协议client/server
 # 示例代码
 
-[message.h](../tutorial/tutorial-10-user_defined_protocol/message.h)  
-[message.cc](../tutorial/tutorial-10-user_defined_protocol/message.cc)  
-[server.cc](../tutorial/tutorial-10-user_defined_protocol/server.cc)  
-[client.cc](../tutorial/tutorial-10-user_defined_protocol/client.cc)  
+[message.h](/tutorial/tutorial-10-user_defined_protocol/message.h)  
+[message.cc](/tutorial/tutorial-10-user_defined_protocol/message.cc)  
+[server.cc](/tutorial/tutorial-10-user_defined_protocol/server.cc)  
+[client.cc](/tutorial/tutorial-10-user_defined_protocol/client.cc)  
 
 # 关于user_defined_protocol
 
@@ -31,7 +31,7 @@ private:
 
     /* You have to implement one of the 'append' functions, and the first one
      * with arguement 'size_t *size' is recommmended. */
-    virtual int append(const void *buf, size_t *size)；
+    virtual int append(const void *buf, size_t *size);
     virtual int append(const void *buf, size_t size);
 
     ...
